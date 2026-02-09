@@ -3,13 +3,13 @@ FastAPI Service for Dental Clinic Agent
 Provides REST endpoints for session creation and LiveKit integration.
 """
 
+# CRITICAL: Path setup must be first thing before any local imports
 import os
 import sys
-
-# Add project root to Python path for reliable imports in cloud deployment
-project_root = os.path.dirname(os.path.abspath(__file__))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+print(f"Python path includes: {current_dir}")  # Debug for cloud deployment
 
 import logging
 import uuid
