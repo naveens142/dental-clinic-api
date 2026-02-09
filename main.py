@@ -4,7 +4,13 @@ Provides REST endpoints for session creation and LiveKit integration.
 """
 
 import os
+import sys
 import logging
+
+# Add project root to Python path for reliable imports in cloud deployment
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 import uuid
 import time
 from datetime import datetime, timedelta
