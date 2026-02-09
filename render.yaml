@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: dental-clinic-api
+    repo: https://github.com/your-username/your-repo-name
+    runtime: python310
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LIVEKIT_URL
+        fromEnv: LIVEKIT_URL
+      - key: LIVEKIT_API_KEY
+        fromEnv: LIVEKIT_API_KEY
+      - key: LIVEKIT_API_SECRET
+        fromEnv: LIVEKIT_API_SECRET
+      - key: DB_HOST
+        fromEnv: DB_HOST
+      - key: DB_USER
+        fromEnv: DB_USER
+      - key: DB_PASSWORD
+        fromEnv: DB_PASSWORD
+      - key: DB_NAME
+        fromEnv: DB_NAME
