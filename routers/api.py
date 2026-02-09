@@ -1,3 +1,11 @@
+import os
+import sys
+
+# Add project root to Python path for reliable imports in cloud deployment
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from models.schemas import LoginRequest, LoginResponse, SessionCreateResponse
@@ -10,7 +18,6 @@ from utils.helpers import (
 )
 from database_service import get_db
 from jwt_utils import create_access_token
-import os
 import logging
 from datetime import datetime
 
