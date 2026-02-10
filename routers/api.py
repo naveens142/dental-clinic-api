@@ -16,6 +16,12 @@ if not sys.path or sys.path[0] != project_root:
 print(f"Router - Python path (0) = {sys.path[0]}")  # Debug for cloud deployment
 print(f"Router - Project root: {project_root}")
 
+# Debug: Check if models directory exists
+print(f"Router - Checking models dir: {os.path.isdir(os.path.join(project_root, 'models'))}")
+print(f"Router - Checking models/__init__.py: {os.path.isfile(os.path.join(project_root, 'models', '__init__.py'))}")
+print(f"Router - Checking models/schemas.py: {os.path.isfile(os.path.join(project_root, 'models', 'schemas.py'))}")
+print(f"Router - Contents of project_root: {sorted([f for f in os.listdir(project_root) if not f.startswith('.')])}")
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 

@@ -100,11 +100,15 @@ KMS/
 # Node modules (if any frontend)
 node_modules/
 
-# LLM/ML Model files (if cached)
-models/
+# LLM/ML Model files (if cached) - NOT the application models/ folder
+# models/  # COMMENTED OUT - we need the application models/ directory
 *.bin
 *.pt
 *.pth
+*.h5
+*.onnx
+*.pkl
+*.joblib
 
 # Jupyter Notebooks (local runs)
 .ipynb_checkpoints/
