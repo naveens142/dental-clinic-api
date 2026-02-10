@@ -12,9 +12,6 @@ if not sys.path or sys.path[0] != project_root:
         sys.path.remove(project_root)
     sys.path.insert(0, project_root)
 
-print(f"Helpers - Python path (0) = {sys.path[0]}")  # Debug for cloud deployment
-print(f"Helpers - Project root: {project_root}")  # Debug for cloud deployment
-
 import uuid
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Depends

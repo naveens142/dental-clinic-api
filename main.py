@@ -16,9 +16,6 @@ if not sys.path or sys.path[0] != project_root:
         sys.path.remove(project_root)
     sys.path.insert(0, project_root)
 
-print(f"Main - Python path (0) = {sys.path[0]}")  # Debug for cloud deployment
-print(f"Main - Project root: {project_root}")  # Debug for cloud deployment
-
 import logging
 import uuid
 import time
