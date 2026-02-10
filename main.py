@@ -7,20 +7,17 @@ Provides REST endpoints for session creation and LiveKit integration.
 import os
 import sys
 
-# Get the directory where this script is located
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the directory where this script is located (project root)
+project_root = os.path.dirname(os.path.abspath(__file__))
 
-# Add current directory to Python path if not already there
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# Ensure project root is at the front of sys.path for absolute imports
+if not sys.path or sys.path[0] != project_root:
+    if project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(0, project_root)
 
-# Also add parent directory for comprehensive coverage
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-    
-print(f"Python path includes: {current_dir}")  # Debug for cloud deployment
-print(f"Python path also includes: {parent_dir}")  # Additional debug
+print(f"Main - Python path (0) = {sys.path[0]}")  # Debug for cloud deployment
+print(f"Main - Project root: {project_root}")  # Debug for cloud deployment
 
 import logging
 import uuid

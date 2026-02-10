@@ -2,69 +2,34 @@
 import os
 import sys
 
-# Get the root directory (go up from routers/api.py to project root)
+# Compute API and project root directories
 api_file_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(api_file_dir)
 
-# Add project root to Python path
-if project_root not in sys.path:
+# Ensure project root is at the front of sys.path so absolute imports like
+# `import models` resolve correctly in deployment environments.
+if not sys.path or sys.path[0] != project_root:
+    if project_root in sys.path:
+        sys.path.remove(project_root)
     sys.path.insert(0, project_root)
-    
-# Also add the directory containing this file for relative imports
-if api_file_dir not in sys.path:
-    sys.path.insert(0, api_file_dir)
 
-print(f"Router - Python path includes: {project_root}")  # Debug for cloud deployment
-print(f"Router - API dir in path: {api_file_dir}")  # Additional debug
+print(f"Router - Python path (0) = {sys.path[0]}")  # Debug for cloud deployment
+print(f"Router - Project root: {project_root}")
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-# Try multiple import strategies to handle different deployment environments
-try:
-    from models.schemas import LoginRequest, LoginResponse, SessionCreateResponse
-except ImportError:
-    try:
-        # Alternative import for different path structures
-        import sys
-        import os
-        sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-        from models.schemas import LoginRequest, LoginResponse, SessionCreateResponse
-    except ImportError:
-        # Last resort - direct import
-        from models import LoginRequest, LoginResponse, SessionCreateResponse
-# Try multiple import strategies for utils and other modules
-try:
-    from utils.helpers import (
-        validate_environment,
-        generate_room_name,
-        generate_participant_identity,
-        verify_jwt_token,
-        generate_livekit_token
-    )
-except ImportError:
-    # Alternative import path
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-    from helpers import (
-        validate_environment,
-        generate_room_name,
-        generate_participant_identity,
-        verify_jwt_token,
-        generate_livekit_token
-    )
-
-try:
-    from database_service import get_db
-    from jwt_utils import create_access_token
-except ImportError:
-    # Alternative import for root modules
-    import sys
-    import os
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-    from database_service import get_db
-    from jwt_utils import create_access_token
+# Import local application modules (project_root is on sys.path)
+from models.schemas import LoginRequest, LoginResponse, SessionCreateResponse
+from utils.helpers import (
+    validate_environment,
+    generate_room_name,
+    generate_participant_identity,
+    verify_jwt_token,
+    generate_livekit_token,
+)
+from database_service import get_db
+from jwt_utils import create_access_token
 import logging
 from datetime import datetime
 

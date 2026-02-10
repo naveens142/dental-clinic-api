@@ -1,10 +1,19 @@
 # CRITICAL: Path setup must be first thing before any local imports
 import os
 import sys
-current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-print(f"Helpers - Python path includes: {current_dir}")  # Debug for cloud deployment
+
+# Get project root (go up from utils/helpers.py to project root)
+helpers_file_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(helpers_file_dir)
+
+# Ensure project root is at the front of sys.path
+if not sys.path or sys.path[0] != project_root:
+    if project_root in sys.path:
+        sys.path.remove(project_root)
+    sys.path.insert(0, project_root)
+
+print(f"Helpers - Python path (0) = {sys.path[0]}")  # Debug for cloud deployment
+print(f"Helpers - Project root: {project_root}")  # Debug for cloud deployment
 
 import uuid
 from datetime import datetime, timedelta
