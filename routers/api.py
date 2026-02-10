@@ -13,8 +13,6 @@ if not sys.path or sys.path[0] != project_root:
         sys.path.remove(project_root)
     sys.path.insert(0, project_root)
 
-
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
