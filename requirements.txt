@@ -9,6 +9,7 @@ cryptography==46.0.4
 email-validator==2.3.0
 slowapi==0.1.8
 requests==2.32.3
-livekit==0.14.0
-livekit-agents==0.14.0
-python-dotenv==1.0.1
+livekit==1.0.25
+livekit-agents==1.4.1
+livekit-api==1.1.0
+livekit-protocol==1.1.2
