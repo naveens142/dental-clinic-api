@@ -24,6 +24,7 @@ from utils.helpers import (
     generate_participant_identity,
     verify_jwt_token,
     generate_livekit_token,
+    create_livekit_agent_dispatch,
 )
 from database_service import get_db
 from jwt_utils import create_access_token
@@ -49,17 +50,25 @@ async def login(request: LoginRequest):
         if not request.email or not request.password:
             logger.warning("Login attempt with missing credentials")
             return LoginResponse(success=False, message="Email and password are required")
+        
+        logger.info(f"Attempting login for user: {request.email}")
         db = get_db()
         user = db.login(request.email, request.password)
+        
         if user:
-            token = create_access_token({"email": user["email"], "id": user["id"]})
-            logger.info(f"Successful login: {request.email}")
-            return LoginResponse(success=True, message="Login successful", token=token, user={"id": user["id"], "email": user["email"]})
+            try:
+                token = create_access_token({"email": user["email"], "id": user["id"]})
+                logger.info(f"Successful login: {request.email}")
+                return LoginResponse(success=True, message="Login successful", token=token, user={"id": user["id"], "email": user["email"]})
+            except Exception as token_error:
+                logger.error(f"Token creation error for {request.email}: {str(token_error)}", exc_info=True)
+                return LoginResponse(success=False, message="Token generation failed. Please try again.")
         else:
             logger.warning(f"Failed login: {request.email} (invalid credentials)")
             return LoginResponse(success=False, message="Invalid email or password")
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
+        logger.error(f"Login error for {request.email}: {type(e).__name__}: {str(e)}", exc_info=True)
+        logger.debug(f"Full login exception details", exc_info=True)
         return LoginResponse(success=False, message="Authentication error. Please try again.")
 
 @router.post("/api/v1/token", response_model=SessionCreateResponse)
@@ -70,31 +79,65 @@ async def create_session(token_payload: dict = Depends(verify_jwt_token)) -> Ses
         room_name = generate_room_name("toothfairy")
         participant_identity = generate_participant_identity()
         user_email = token_payload.get("email", "unknown")
-        logger.info(f"Creating session for user: {user_email}, room: {room_name}")
+        user_id = token_payload.get("id")
+        
+        logger.info(f"Creating session for user: {user_email} (ID: {user_id}), room: {room_name}")
+        
+        # Create database session record
         db = get_db()
         session_id = db.create_session(room_name)
         logger.info(f"Created database session: {session_id}")
+        
+        # Get LiveKit configuration
         livekit_url = os.getenv("LIVEKIT_URL")
         livekit_api_key = os.getenv("LIVEKIT_API_KEY")
         livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
-        jwt_token = generate_livekit_token(
+        
+        # Create agent dispatch with explicit VideoGrants
+        logger.info(f"Creating LiveKit agent dispatch for session: {session_id}")
+        dispatch_metadata = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "user_email": user_email,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        dispatch_result = await create_livekit_agent_dispatch(
             room_name=room_name,
             participant_identity=participant_identity,
-            session_id=session_id,
-            livekit_url=livekit_url,
+            participant_name=user_email,
             livekit_api_key=livekit_api_key,
-            livekit_api_secret=livekit_api_secret
+            livekit_api_secret=livekit_api_secret,
+            livekit_url=livekit_url,
+            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent"),
+            metadata=dispatch_metadata
         )
-        user_id = token_payload.get("id")
-        user_email = token_payload.get("email")
+        
+        logger.info(f"✓ Agent dispatch created: {dispatch_result.get('dispatch_id')}")
+        
+        # Response data with all necessary tokens and dispatch info
         response_data = {
             "user_id": user_id,
             "user_email": user_email,
+            "session_id": session_id,
             "livekit_url": livekit_url,
-            "jwt_token": jwt_token
+            "room_name": room_name,
+            "participant_identity": participant_identity,
+            "livekit_api_key": livekit_api_key,
+            "livekit_api_secret" : livekit_api_secret,
+            "dispatch_metadata": dispatch_metadata, 
+            "dispatch_id": dispatch_result.get("dispatch_id"),
+            "access_token": dispatch_result.get("access_token"),
         }
-        logger.info(f"Session created successfully: {session_id}")
-        return SessionCreateResponse(success=True, message="Session created successfully", data=response_data, error=None)
+        
+        logger.info(f"✓ Session created successfully: {session_id}")
+        return SessionCreateResponse(
+            success=True, 
+            message="Session created successfully with agent dispatch", 
+            data=response_data, 
+            error=None
+        )
+        
     except EnvironmentError as e:
         error_msg = f"Configuration error: {str(e)}"
         logger.error(error_msg)

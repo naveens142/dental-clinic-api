@@ -7,6 +7,7 @@ Handles all database operations for the dental clinic agent.
 import logging
 import uuid
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List
 import mysql.connector
 from mysql.connector import Error, pooling
@@ -46,10 +47,11 @@ class DatabaseService:
         """Initialize connection pool if not already done."""
         if DatabaseService._pool is None:
             try:
+                logger.info(f"Initializing connection pool to {self.config['host']}:{self.config['port']}...")
                 DatabaseService._pool = pooling.MySQLConnectionPool(
                     pool_name="dental_clinic_pool",
-                    pool_size=5,
-                    pool_reset_session=True,
+                    pool_size=8,  # Reduced pool size for faster initialization
+                    pool_reset_session=False,  # Don't reset sessions between uses
                     **self.config,
                     autocommit=False,
                     use_unicode=True,
@@ -58,6 +60,7 @@ class DatabaseService:
                 logger.info("Connection pool initialized successfully")
             except Error as e:
                 logger.error(f"Failed to create connection pool: {e}")
+                logger.error(f"Database config: host={self.config.get('host')}, user={self.config.get('user')}, database={self.config.get('database')}, port={self.config.get('port')}")
                 raise
     
     def get_connection(self):
@@ -68,7 +71,6 @@ class DatabaseService:
             return DatabaseService._pool.get_connection()
         except Error as e:
             logger.error(f"Database connection error: {e}")
-            raise
             raise
     
     # ========== SESSION MANAGEMENT ==========
@@ -84,6 +86,8 @@ class DatabaseService:
             session_id
         """
         session_id = f"sess_{uuid.uuid4().hex[:12]}"
+        conn = None
+        cursor = None
         
         try:
             conn = self.get_connection()
@@ -101,13 +105,26 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error creating session: {e}")
+            if conn:
+                conn.rollback()
             raise
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def end_session(self, session_id: str, duration_seconds: int = None):
         """End an active session."""
+        conn = None
+        cursor = None
+        
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -124,28 +141,66 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error ending session: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     # ========== USER LOGIN & AUTHENTICATION ==========
     
     def login(self, email: str, password: str):
         """Login user by email and hashed password."""
-        conn = self.get_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        # Hash the password
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
-        
-        # Query user_auth table
-        cursor.execute("SELECT id, email FROM user_auth WHERE email = %s AND password = %s", (email, hashed_password))
-        user = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        return user
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            # Hash the password
+            hashed_password = hashlib.sha256(password.encode()).hexdigest()
+            logger.info(f"[LOGIN] Attempting login for email: {email}")
+            
+            # Query user_auth table
+            query = "SELECT id, email FROM user_auth WHERE email = %s AND password = %s"
+            logger.debug(f"[LOGIN] Executing query: {query}")
+            cursor.execute(query, (email, hashed_password))
+            user = cursor.fetchone()
+            
+            if user:
+                logger.info(f"[LOGIN] ✓ User found: {email}")
+            else:
+                logger.info(f"[LOGIN] ✗ No matching user/password for: {email}")
+            
+            return user
+        except Error as e:
+            logger.error(f"[LOGIN] ✗ Database error: {type(e).__name__}: {str(e)}", exc_info=True)
+            # Check if it's a table doesn't exist error
+            if "no such table" in str(e).lower() or "doesn't exist" in str(e).lower():
+                logger.error(f"[LOGIN] ✗ user_auth table may not exist. Check database schema.")
+            raise
+        except Exception as e:
+            logger.error(f"[LOGIN] ✗ Unexpected error: {type(e).__name__}: {str(e)}", exc_info=True)
+            raise
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     # ========== MESSAGE LOGGING & CONVERSATION ==========
     
@@ -162,6 +217,8 @@ class DatabaseService:
         Returns:
             user_id
         """
+        conn = None
+        cursor = None
         try:
             logger.info(f"[GET_OR_CREATE_USER] Starting - phone={phone}, name={name}, email={email}")
             conn = self.get_connection()
@@ -213,9 +270,15 @@ class DatabaseService:
             raise
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except:
+                    pass
             logger.info(f"[GET_OR_CREATE_USER] Connection closed")
     
     def update_user(self, user_id: int, **kwargs):
@@ -226,6 +289,8 @@ class DatabaseService:
         if not fields:
             return
         
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -241,9 +306,19 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error updating user: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def upsert_user_contact(self, name: str, phone: str, email: str, calcom_uid: str = None) -> int:
         """
@@ -259,6 +334,8 @@ class DatabaseService:
         Returns:
             user_id (newly created or existing)
         """
+        conn = None
+        cursor = None
         try:
             logger.info(f"[UPSERT_USER] Starting - name={name}, phone={phone}, email={email}")
             conn = self.get_connection()
@@ -316,9 +393,15 @@ class DatabaseService:
             raise
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except:
+                    pass
             logger.info(f"[UPSERT_USER] Connection closed")
     
     def mark_calcom_sync(self, booking_id: str, calcom_uid: str, sync_status: str = "synced"):
@@ -331,6 +414,8 @@ class DatabaseService:
             calcom_uid: CalCom booking UID (unique identifier from API)
             sync_status: Status of sync ('synced', 'cancelled', 'rescheduled', 'pending', 'failed')
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -347,9 +432,19 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"[SYNC] Error marking booking sync: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     # ========== CONVERSATION LOGGING ==========
     
@@ -371,6 +466,8 @@ class DatabaseService:
             user_id: Associated user ID (optional)
             audio_duration: Duration of audio in seconds (optional)
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -387,9 +484,19 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error logging message: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def link_conversation_logs_to_user(self, session_id: str, user_id: int):
         """
@@ -401,6 +508,8 @@ class DatabaseService:
             session_id: Session ID
             user_id: User ID to link to all logs in this session
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -419,12 +528,24 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error linking conversation logs to user: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def get_session_conversation(self, session_id: str) -> List[Dict[str, Any]]:
         """Retrieve full conversation for a session."""
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -443,8 +564,16 @@ class DatabaseService:
             logger.error(f"Error retrieving conversation: {e}")
             return []
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     # ========== BOOKING MANAGEMENT ==========
     
@@ -468,6 +597,8 @@ class DatabaseService:
             booking_id
         """
         booking_id = f"book_{uuid.uuid4().hex[:12]}"
+        conn = None
+        cursor = None
         
         try:
             logger.info(f"[CREATE_BOOKING] Starting - session_id={session_id}, user_id={user_id}")
@@ -507,13 +638,21 @@ class DatabaseService:
             raise
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except:
+                    pass
             logger.info(f"[CREATE_BOOKING] Connection closed")
     
     def get_booking(self, booking_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve booking details."""
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -527,8 +666,16 @@ class DatabaseService:
             logger.error(f"Error retrieving booking: {e}")
             return None
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def update_booking_status(
         self, 
@@ -544,6 +691,8 @@ class DatabaseService:
             new_status: 'confirmed', 'cancelled', 'completed', 'rescheduled', 'no-show'
             notes: Optional change notes
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -560,9 +709,19 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error updating booking: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def reschedule_booking(
         self,
@@ -578,6 +737,8 @@ class DatabaseService:
             new_appointment_time: New appointment start time
             reason: Reason for rescheduling
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -618,9 +779,19 @@ class DatabaseService:
             
         except Error as e:
             logger.error(f"Error rescheduling booking: {e}")
+            if conn:
+                conn.rollback()
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def cancel_booking(self, booking_id: str, reason: str = None):
         """Cancel a booking."""
@@ -628,6 +799,8 @@ class DatabaseService:
     
     def get_user_bookings(self, user_id: int, limit: int = 10) -> List[Dict[str, Any]]:
         """Get user's appointment history."""
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -648,8 +821,16 @@ class DatabaseService:
             logger.error(f"Error retrieving user bookings: {e}")
             return []
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def find_bookings_by_phone(self, phone: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
@@ -663,6 +844,8 @@ class DatabaseService:
         Returns:
             List of booking details
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -704,8 +887,16 @@ class DatabaseService:
             logger.error(f"Error finding bookings by phone: {e}")
             return []
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def find_user_by_phone_fuzzy(self, phone: str) -> Optional[Dict[str, Any]]:
         """
@@ -718,6 +909,8 @@ class DatabaseService:
         Returns:
             User details if found, None otherwise
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -750,8 +943,16 @@ class DatabaseService:
             logger.error(f"Error finding user by phone (fuzzy): {e}")
             return None
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def find_bookings_by_email(self, email: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
@@ -764,6 +965,8 @@ class DatabaseService:
         Returns:
             List of booking details
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -785,8 +988,16 @@ class DatabaseService:
             logger.error(f"Error finding bookings by email: {e}")
             return []
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def find_bookings_by_name(self, patient_name: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
@@ -799,6 +1010,8 @@ class DatabaseService:
         Returns:
             List of booking details
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -820,8 +1033,16 @@ class DatabaseService:
             logger.error(f"Error finding bookings by name: {e}")
             return []
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     def find_booking_by_name_and_time(self, patient_name: str, appointment_time: str) -> Optional[Dict[str, Any]]:
         """
@@ -834,6 +1055,8 @@ class DatabaseService:
         Returns:
             Booking details if found, None otherwise
         """
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -880,8 +1103,16 @@ class DatabaseService:
             logger.error(f"Error finding booking by name and time: {e}")
             return None
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
     
     # ========== ANALYTICS ==========
     
@@ -938,12 +1169,16 @@ class DatabaseService:
                 conn.rollback()
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except:
+                    pass
             logger.info(f"[LOG_HISTORY] Connection closed")
-            cursor.close()
-            conn.close()
     
     def update_session_analytics(self):
         """
@@ -1053,17 +1288,23 @@ class DatabaseService:
                 conn.rollback()
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                except:
+                    pass
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except:
+                    pass
             logger.info(f"[ANALYTICS] Connection closed")
-            cursor.close()
-            conn.close()
     
     def get_session_stats(self, date: datetime = None) -> Dict[str, Any]:
         """Get statistics for a specific date."""
         date = date or datetime.now().date()
         
+        conn = None
+        cursor = None
         try:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
@@ -1100,8 +1341,16 @@ class DatabaseService:
             logger.error(f"Error retrieving stats: {e}")
             return {}
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
 
 
 # Singleton instance for easy access
