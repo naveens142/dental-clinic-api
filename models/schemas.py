@@ -2,8 +2,8 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 
 class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    email: EmailStr= Field(...,example="westack@gmail.com")
+    password: str = Field(..., min_length=6, max_length=128, example="westack.ai")
 
     @field_validator('password')
     @classmethod

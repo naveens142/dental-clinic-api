@@ -123,6 +123,7 @@ async def create_session(token_payload: dict = Depends(verify_jwt_token)) -> Ses
             "livekit_url": livekit_url,
             "room_name": room_name,
             "participant_identity": participant_identity,
+            "agent_name": os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent"),
             "livekit_api_key": livekit_api_key,
             "livekit_api_secret" : livekit_api_secret,
             "dispatch_metadata": dispatch_metadata, 
