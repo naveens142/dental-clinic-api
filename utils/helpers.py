@@ -79,15 +79,17 @@ def generate_livekit_token(
     """
     from livekit.api import AccessToken, VideoGrants
     
-    token = AccessToken(livekit_api_key, livekit_api_secret)
-    token.identity = participant_identity
-    token.grants = VideoGrants(
-        room_join=True,  # CRITICAL: Required for agent to join room
-        room=room_name,
-        can_publish=True,
-        can_subscribe=True,
-        can_publish_data=True,
-    )
+    token = AccessToken(livekit_api_key, livekit_api_secret) \
+        .with_identity(participant_identity) \
+        .with_grants(
+            VideoGrants(
+                room_join=True,  # CRITICAL: Required for agent to join room
+                room=room_name,
+                can_publish=True,
+                can_subscribe=True,
+                can_publish_data=True,
+            )
+        )
     
     return token.to_jwt()
 
@@ -121,7 +123,6 @@ async def create_livekit_agent_dispatch(
     """
     try:
         from livekit.api import AccessToken, VideoGrants
-        import aiohttp
         
         # Use agent name from environment if not provided
         if not agent_name:
@@ -136,69 +137,50 @@ async def create_livekit_agent_dispatch(
         logger.debug(f"Creating AccessToken for identity: {participant_identity}")
         
         # Create token with proper video grants
-        token = AccessToken(livekit_api_key, livekit_api_secret)
-        token.identity = participant_identity
-        token.name = participant_name
-        token.grants = VideoGrants(
-            room_join=True,  # CRITICAL: Required for agent to join room
-            room=room_name,
-            can_publish=True,
-            can_subscribe=True,
-            can_publish_data=True,
-        )
+        token = AccessToken(livekit_api_key, livekit_api_secret) \
+            .with_identity(participant_identity) \
+            .with_name(participant_name) \
+            .with_grants(
+                VideoGrants(
+                    room_join=True,  # CRITICAL: Required for agent to join room
+                    room=room_name,
+                    can_publish=True,
+                    can_subscribe=True,
+                    can_publish_data=True,
+                )
+            )
         
         access_token = token.to_jwt()
         logger.debug(f"✓ AccessToken created successfully with room_join=True")
         
-        # Create dispatch metadata with agent information
+        # Use official LiveKit SDK for agent dispatch
+        from livekit import api as lk_api
+        
         dispatch_id = str(uuid.uuid4())
-        dispatch_metadata_dict["agent_name"] = agent_name
-        dispatch_metadata_dict["dispatch_id"] = dispatch_id
-        
-        # Convert wss:// to https:// for REST API calls
-        # (wss is for WebSocket, https is for REST API)
-        rest_url = livekit_url.replace("wss://", "https://").replace("ws://", "http://")
-        dispatch_api_url = f"{rest_url}/lk/agents/dispatch"
-        
-        logger.info(f"Dispatching agent to room via: {dispatch_api_url}")
-        
-        # Dispatch payload
-        dispatch_payload = {
-            "room": room_name,
-            "identity": participant_identity,
-            "name": participant_name,
-            "token": access_token,
-            "metadata": dispatch_metadata_dict
-        }
-        
-        # Send dispatch request to LiveKit
+        lkapi = None
         try:
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Authorization": f"Bearer {livekit_api_key}:{livekit_api_secret}",
-                    "Content-Type": "application/json"
-                }
-                
-                async with session.post(
-                    dispatch_api_url, 
-                    json=dispatch_payload, 
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status in [200, 201]:
-                        logger.info(f"✓ Agent dispatched successfully to room: {room_name}")
-                    else:
-                        error_text = await response.text()
-                        logger.warning(f"Dispatch API returned {response.status}: {error_text}")
-                        logger.info(f"Continuing anyway - agent may connect via token")
-        except aiohttp.ClientError as e:
-            logger.warning(f"Failed to send dispatch request: {str(e)}")
-            logger.info(f"Continuing - client will connect with token directly")
-        except Exception as e:
-            logger.warning(f"Dispatch error (non-critical): {type(e).__name__}: {str(e)}")
+            lkapi = lk_api.LiveKitAPI(livekit_url, livekit_api_key, livekit_api_secret)
+            dispatch = await lkapi.agent_dispatch.create_dispatch(
+                lk_api.CreateAgentDispatchRequest(
+                    agent_name=agent_name,
+                    room=room_name,
+                    metadata=str(dispatch_metadata_dict)
+                )
+            )
+            
+            logger.info(f"✓ Agent dispatched successfully to room: {room_name}")
+            # Extract dispatch ID from response if available
+            if dispatch and hasattr(dispatch, 'agent_job') and dispatch.agent_job:
+                dispatch_id = dispatch.agent_job.id
+            
+        except Exception as dispatch_error:
+            # If dispatch fails, still allow connection via token
+            logger.warning(f"Agent dispatch failed: {type(dispatch_error).__name__}: {str(dispatch_error)}")
             logger.info(f"Continuing - agent will use token-based connection")
-        
-        logger.info(f"✓ Agent dispatch created: {dispatch_id}")
+        finally:
+            # Properly close the LiveKit API connection
+            if lkapi:
+                await lkapi.aclose()
         
         return {
             "dispatch_id": dispatch_id,
