@@ -115,7 +115,9 @@ async def create_session(token_payload: dict = Depends(verify_jwt_token)) -> Ses
         
         logger.info(f"✓ Agent dispatch created: {dispatch_result.get('dispatch_id')}")
         
-        # Response data with all necessary tokens and dispatch info
+        # Response data for client connection
+        # IMPORTANT: Only send access_token to client (not API keys - security risk)
+        # Client uses access_token to authenticate with LiveKit server
         response_data = {
             "user_id": user_id,
             "user_email": user_email,
@@ -123,15 +125,14 @@ async def create_session(token_payload: dict = Depends(verify_jwt_token)) -> Ses
             "livekit_url": livekit_url,
             "room_name": room_name,
             "participant_identity": participant_identity,
+            "participant_name": user_email,
             "agent_name": os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent"),
-            "livekit_api_key": livekit_api_key,
-            "livekit_api_secret" : livekit_api_secret,
-            "dispatch_metadata": dispatch_metadata, 
             "dispatch_id": dispatch_result.get("dispatch_id"),
             "access_token": dispatch_result.get("access_token"),
         }
         
         logger.info(f"✓ Session created successfully: {session_id}")
+        logger.debug(f"Token details - ID: {participant_identity}, Room: {room_name}")
         return SessionCreateResponse(
             success=True, 
             message="Session created successfully with agent dispatch", 

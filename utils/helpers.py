@@ -104,6 +104,7 @@ async def create_livekit_agent_dispatch(
 ) -> dict:
     """
     Create an explicit LiveKit agent dispatch for the conversation.
+    Wakes up the agent from sleeping state and assigns it to the room.
     
     Args:
         room_name: The LiveKit room name
@@ -111,7 +112,7 @@ async def create_livekit_agent_dispatch(
         participant_name: Display name of the participant
         livekit_api_key: LiveKit API key
         livekit_api_secret: LiveKit API secret
-        livekit_url: LiveKit server URL (REST API endpoint)
+        livekit_url: LiveKit server URL (WebSocket endpoint)
         agent_name: Name of the agent to dispatch (from env if not provided)
         metadata: Optional metadata to pass to the agent
         
@@ -120,6 +121,7 @@ async def create_livekit_agent_dispatch(
     """
     try:
         from livekit.api import AccessToken, VideoGrants
+        import aiohttp
         
         # Use agent name from environment if not provided
         if not agent_name:
@@ -133,7 +135,7 @@ async def create_livekit_agent_dispatch(
         # Create access token using LiveKit SDK (ensures proper permissions)
         logger.debug(f"Creating AccessToken for identity: {participant_identity}")
         
-        # Create token with proper video grants (this includes room_join=True by default)
+        # Create token with proper video grants
         token = AccessToken(livekit_api_key, livekit_api_secret)
         token.identity = participant_identity
         token.name = participant_name
@@ -153,7 +155,49 @@ async def create_livekit_agent_dispatch(
         dispatch_metadata_dict["agent_name"] = agent_name
         dispatch_metadata_dict["dispatch_id"] = dispatch_id
         
-        logger.debug(f"Dispatch metadata: {dispatch_metadata_dict}")
+        # Convert wss:// to https:// for REST API calls
+        # (wss is for WebSocket, https is for REST API)
+        rest_url = livekit_url.replace("wss://", "https://").replace("ws://", "http://")
+        dispatch_api_url = f"{rest_url}/lk/agents/dispatch"
+        
+        logger.info(f"Dispatching agent to room via: {dispatch_api_url}")
+        
+        # Dispatch payload
+        dispatch_payload = {
+            "room": room_name,
+            "identity": participant_identity,
+            "name": participant_name,
+            "token": access_token,
+            "metadata": dispatch_metadata_dict
+        }
+        
+        # Send dispatch request to LiveKit
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {livekit_api_key}:{livekit_api_secret}",
+                    "Content-Type": "application/json"
+                }
+                
+                async with session.post(
+                    dispatch_api_url, 
+                    json=dispatch_payload, 
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status in [200, 201]:
+                        logger.info(f"✓ Agent dispatched successfully to room: {room_name}")
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"Dispatch API returned {response.status}: {error_text}")
+                        logger.info(f"Continuing anyway - agent may connect via token")
+        except aiohttp.ClientError as e:
+            logger.warning(f"Failed to send dispatch request: {str(e)}")
+            logger.info(f"Continuing - client will connect with token directly")
+        except Exception as e:
+            logger.warning(f"Dispatch error (non-critical): {type(e).__name__}: {str(e)}")
+            logger.info(f"Continuing - agent will use token-based connection")
+        
         logger.info(f"✓ Agent dispatch created: {dispatch_id}")
         
         return {
