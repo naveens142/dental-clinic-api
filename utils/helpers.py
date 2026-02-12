@@ -62,23 +62,34 @@ def generate_livekit_token(
     livekit_api_secret: str,
     token_ttl: int = 86400
 ) -> str:
-    payload = {
-        "iss": livekit_api_key,
-        "sub": participant_identity,
-        "aud": room_name,
-        "nbf": datetime.utcnow(),
-        "exp": datetime.utcnow() + timedelta(seconds=token_ttl),
-        "video": {
-            "room_join": True,
-            "room": room_name,
-            "can_publish": True,
-            "can_subscribe": True,
-            "can_publish_data": True,
-        },
-        "livekit_url": livekit_url,
-        "session_id": session_id
-    }
-    return jwt.encode(payload, livekit_api_secret, algorithm="HS256")
+    """
+    Generate LiveKit access token using the official SDK.
+    
+    Args:
+        room_name: Room to join
+        participant_identity: Unique participant identifier
+        session_id: Session ID for tracking
+        livekit_url: LiveKit server URL
+        livekit_api_key: API key for token signing
+        livekit_api_secret: API secret for token signing
+        token_ttl: Token time-to-live in seconds (default 24 hours)
+    
+    Returns:
+        JWT token string with room_join=True permission
+    """
+    from livekit.api import AccessToken, VideoGrants
+    
+    token = AccessToken(livekit_api_key, livekit_api_secret)
+    token.identity = participant_identity
+    token.grants = VideoGrants(
+        room_join=True,  # CRITICAL: Required for agent to join room
+        room=room_name,
+        can_publish=True,
+        can_subscribe=True,
+        can_publish_data=True,
+    )
+    
+    return token.to_jwt()
 
 
 async def create_livekit_agent_dispatch(
@@ -108,7 +119,7 @@ async def create_livekit_agent_dispatch(
         Dictionary with dispatch info: dispatch_id, access_token, room, identity
     """
     try:
-        import jwt as pyjwt
+        from livekit.api import AccessToken, VideoGrants
         
         # Use agent name from environment if not provided
         if not agent_name:
@@ -119,34 +130,23 @@ async def create_livekit_agent_dispatch(
         
         logger.info(f"Creating LiveKit agent dispatch for room: {room_name}, agent: {agent_name}")
         
-        # Create access token with proper grants
+        # Create access token using LiveKit SDK (ensures proper permissions)
         logger.debug(f"Creating AccessToken for identity: {participant_identity}")
         
-        # Create JWT access token with video grants
-        now = datetime.utcnow()
-        token_exp = now + timedelta(hours=24)
+        # Create token with proper video grants (this includes room_join=True by default)
+        token = AccessToken(livekit_api_key, livekit_api_secret)
+        token.identity = participant_identity
+        token.name = participant_name
+        token.grants = VideoGrants(
+            room_join=True,  # CRITICAL: Required for agent to join room
+            room=room_name,
+            can_publish=True,
+            can_subscribe=True,
+            can_publish_data=True,
+        )
         
-        token_payload = {
-            "iss": livekit_api_key,
-            "sub": participant_identity,
-            "aud": room_name,
-            "nbf": int(now.timestamp()),
-            "exp": int(token_exp.timestamp()),
-            "grants": {
-                "identity": participant_identity,
-                "name": participant_name,
-                "video": {
-                    "room_join": True,
-                    "room": room_name,
-                    "can_publish": True,
-                    "can_subscribe": True,
-                    "can_publish_data": True,
-                }
-            }
-        }
-        
-        access_token = pyjwt.encode(token_payload, livekit_api_secret, algorithm="HS256")
-        logger.debug(f"✓ AccessToken created successfully")
+        access_token = token.to_jwt()
+        logger.debug(f"✓ AccessToken created successfully with room_join=True")
         
         # Create dispatch metadata with agent information
         dispatch_id = str(uuid.uuid4())
