@@ -13,6 +13,7 @@ if not sys.path or sys.path[0] != project_root:
     sys.path.insert(0, project_root)
 
 import uuid
+import asyncio
 from datetime import datetime, timedelta
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer
@@ -123,6 +124,7 @@ async def create_livekit_agent_dispatch(
     """
     try:
         from livekit.api import AccessToken, VideoGrants
+        from livekit import api as lk_api
         
         # Use agent name from environment if not provided
         if not agent_name:
@@ -133,33 +135,27 @@ async def create_livekit_agent_dispatch(
         
         logger.info(f"Creating LiveKit agent dispatch for room: {room_name}, agent: {agent_name}")
         
-        # Create access token using LiveKit SDK (ensures proper permissions)
-        logger.debug(f"Creating AccessToken for identity: {participant_identity}")
-        
-        # Create token with proper video grants
-        token = AccessToken(livekit_api_key, livekit_api_secret) \
-            .with_identity(participant_identity) \
-            .with_name(participant_name) \
-            .with_grants(
-                VideoGrants(
-                    room_join=True,  # CRITICAL: Required for agent to join room
-                    room=room_name,
-                    can_publish=True,
-                    can_subscribe=True,
-                    can_publish_data=True,
-                )
-            )
-        
-        access_token = token.to_jwt()
-        logger.debug(f"✓ AccessToken created successfully with room_join=True")
-        
-        # Use official LiveKit SDK for agent dispatch
-        from livekit import api as lk_api
-        
-        dispatch_id = str(uuid.uuid4())
         lkapi = None
+        dispatch_id = str(uuid.uuid4())
+        
         try:
             lkapi = lk_api.LiveKitAPI(livekit_url, livekit_api_key, livekit_api_secret)
+            
+            # STEP 1: Check and delete existing room if it exists
+            logger.debug(f"Checking if room '{room_name}' already exists...")
+            try:
+                rooms = await lkapi.room.list_rooms()
+                existing_room = next((r for r in rooms if r.name == room_name), None)
+                if existing_room:
+                    logger.info(f"Room '{room_name}' already exists. Deleting it...")
+                    await lkapi.room.delete_room(lk_api.RoomDeleteRequest(room=room_name))
+                    logger.info(f"✓ Old room '{room_name}' deleted")
+                    await asyncio.sleep(2)  # Wait for cleanup
+            except Exception as room_check_error:
+                logger.debug(f"Room check/delete note: {room_check_error}")
+            
+            # STEP 2: Dispatch agent to the room
+            logger.info(f"Dispatching agent '{agent_name}' to room '{room_name}'...")
             dispatch = await lkapi.agent_dispatch.create_dispatch(
                 lk_api.CreateAgentDispatchRequest(
                     agent_name=agent_name,
@@ -169,18 +165,56 @@ async def create_livekit_agent_dispatch(
             )
             
             logger.info(f"✓ Agent dispatched successfully to room: {room_name}")
+            
             # Extract dispatch ID from response if available
             if dispatch and hasattr(dispatch, 'agent_job') and dispatch.agent_job:
                 dispatch_id = dispatch.agent_job.id
+            elif dispatch and hasattr(dispatch, 'agent_dispatch_id'):
+                dispatch_id = dispatch.agent_dispatch_id
+            
+            # STEP 3: CRITICAL - Wait for agent to initialize (8-10 seconds)
+            logger.info("⏳ Waiting 8 seconds for agent to initialize...")
+            await asyncio.sleep(8)
+            
+            # STEP 4: Verify agent joined the room (optional but recommended)
+            try:
+                participants = await lkapi.room.list_participants(
+                    lk_api.ListParticipantsRequest(room=room_name)
+                )
+                agent_in_room = any(p.identity.startswith('agent-') or p.kind == 'agent' for p in participants)
+                if agent_in_room:
+                    logger.info(f"✓ Agent confirmed in room (participants: {len(participants)})")
+                else:
+                    logger.warning(f"⚠️ Agent not yet visible in room (participants: {len(participants)})")
+            except Exception as check_error:
+                logger.debug(f"Could not verify agent in room: {check_error}")
             
         except Exception as dispatch_error:
-            # If dispatch fails, still allow connection via token
-            logger.warning(f"Agent dispatch failed: {type(dispatch_error).__name__}: {str(dispatch_error)}")
-            logger.info(f"Continuing - agent will use token-based connection")
+            logger.error(f"Agent dispatch failed: {type(dispatch_error).__name__}: {str(dispatch_error)}")
+            raise  # Re-raise to handle in outer try-catch
         finally:
             # Properly close the LiveKit API connection
             if lkapi:
                 await lkapi.aclose()
+        
+        # STEP 5: Create access token for participant (after agent is ready)
+        logger.debug(f"Creating AccessToken for identity: {participant_identity}")
+        
+        token = AccessToken(livekit_api_key, livekit_api_secret) \
+            .with_identity(participant_identity) \
+            .with_name(participant_name) \
+            .with_grants(
+                VideoGrants(
+                    room_join=True,
+                    room=room_name,
+                    can_publish=True,
+                    can_subscribe=True,
+                    can_publish_data=True,
+                )
+            )
+        
+        access_token = token.to_jwt()
+        logger.debug(f"✓ AccessToken created successfully")
         
         return {
             "dispatch_id": dispatch_id,
