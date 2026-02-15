@@ -128,7 +128,7 @@ async def create_livekit_agent_dispatch(
         
         # Use agent name from environment if not provided
         if not agent_name:
-            agent_name = os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent")
+            agent_name = os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent-prod")
         
         # Initialize metadata if not provided
         dispatch_metadata_dict = metadata or {}

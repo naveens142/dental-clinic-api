@@ -109,7 +109,7 @@ async def create_session(token_payload: dict = Depends(verify_jwt_token)) -> Ses
             livekit_api_key=livekit_api_key,
             livekit_api_secret=livekit_api_secret,
             livekit_url=livekit_url,
-            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent"),
+            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent-prod"),
             metadata=dispatch_metadata
         )
         
@@ -126,7 +126,7 @@ async def create_session(token_payload: dict = Depends(verify_jwt_token)) -> Ses
             "room_name": room_name,
             "participant_identity": participant_identity,
             "participant_name": user_email,
-            "agent_name": os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent"),
+            "agent_name": os.getenv("LIVEKIT_AGENT_NAME", "toothfairy-dental-agent-prod"),
             "dispatch_id": dispatch_result.get("dispatch_id"),
             "access_token": dispatch_result.get("access_token"),
         }
